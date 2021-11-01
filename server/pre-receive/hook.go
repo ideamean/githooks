@@ -1,12 +1,14 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/spf13/viper"
+	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,6 +30,14 @@ const (
 	ColorEnd        = "\033[0m"
 )
 
+type FileType string
+
+const (
+	FileTypePHP FileType = ".php"
+	FileTypeJS  FileType = ".js"
+	FileTypeGO  FileType = ".go"
+)
+
 var codeExemptionRegexp = regexp.MustCompile(`\[A\]([0-9]+)\[/A\]`)
 
 type Hook struct {
@@ -36,6 +46,8 @@ type Hook struct {
 	Repos string
 	// 当前项目所属的命名空间
 	NameSpace string
+	// 临时目录
+	TempDir string
 }
 
 // FindCodeExemption code
@@ -146,10 +158,20 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 // Run
 // return value: when success 0, otherwise > 0
 func (h *Hook) Run(oldRev, newRev, ref string) int {
+	h.Info(ColorRedBold, "DEBUG: %s %s %s", oldRev, newRev, ref)
 	h.parseEnv()
+	err := h.CreateTempDir()
+	if err != nil {
+		h.Info(ColorRedBold, "create temp dir err: %s", err)
+		return 1
+	}
+
+	defer func() {
+		h.ClearTemp()
+	}()
 
 	// load config
-	err := h.LoadConfig()
+	err = h.LoadConfig()
 	if err != nil {
 		h.Info(ColorRedBold, "load config err: %s", err)
 		return 1
@@ -176,7 +198,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		return 1
 	}
 
-	object, err := r.CommitObject(plumbing.NewHash(newRev))
+	obj, err := r.CommitObject(plumbing.NewHash(newRev))
 	if err != nil {
 		h.Info(ColorRedBold, "get object err: %s", err)
 		return 1
@@ -184,7 +206,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	// check email format
 	isEmailValid := false
-	emailSuf := strings.Split(object.Author.Email, "@")[1]
+	emailSuf := strings.Split(obj.Author.Email, "@")[1]
 	for _, allowEmail := range h.Conf.AllowEmail {
 		if allowEmail == emailSuf {
 			isEmailValid = true
@@ -193,12 +215,12 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	}
 
 	if !isEmailValid {
-		h.Info(ColorRedBold, "git config.email was not allowed : %s, require: %+v, command: git config user.email $email", object.Author.Email, h.Conf.AllowEmail)
+		h.Info(ColorRedBold, "git config.email was not allowed : %s, require: %+v, command: git config user.email $email", obj.Author.Email, h.Conf.AllowEmail)
 		return 1
 	}
 
 	// super account
-	if h.IsSuperAccount(object.Author.Email) {
+	if h.IsSuperAccount(obj.Author.Email) {
 		h.Info(ColorGreenBold, "Hey, you commit with a super account!")
 		return 0
 	}
@@ -214,22 +236,22 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	}
 
 	// code exemption
-	if h.CodeExemptionCheck(object.Message) {
-		h.Info(ColorPurple, "congratulations, code exemption triggered!")
+	if h.CodeExemptionCheck(obj.Message) {
+		h.Info(ColorGreenBold, "congratulations, code exemption triggered!")
 		return 0
 	}
 
 	// merge request
 	keywords := []string{"合并分支", "Merge"}
 	for _, key := range keywords {
-		if strings.Contains(object.Message, key) {
+		if strings.Contains(obj.Message, key) {
 			return 0
 		}
 	}
 
 	// jiraID
 	if h.Conf.RequireJiraIDRexp != "" {
-		jiraIDArr := h.GetJiraID(object.Message)
+		jiraIDArr := h.GetJiraID(obj.Message)
 		if len(jiraIDArr) <= 0 {
 			h.Info(ColorRedBold, "commit message must contain at lease one jira ID, rule: %s, use git commit --amend", h.Conf.RequireJiraIDRexp)
 			return 1
@@ -237,13 +259,13 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	}
 
 	// code exemption
-	if h.CodeExemptionCheck(object.Message) {
-		h.Info(ColorPurple, "congratulations, code exemption triggered!")
+	if h.CodeExemptionCheck(obj.Message) {
+		h.Info(ColorGreenBold, "congratulations, code exemption triggered!")
 		return 0
 	}
 
 	// base rule passed
-	h.Info(ColorPurple, "base rule check passed!")
+	h.Info(ColorGreenBold, "base rule check passed!")
 
 	if oldRev == EmptyRef || newRev == EmptyRef {
 		return 0
@@ -262,55 +284,169 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		return 1
 	}
 
-	newTree, err := object.Tree()
+	newTree, err := obj.Tree()
 	if err != nil {
 		h.Info(ColorRedBold, "get new object tree(%s) err: %s", newRev, err)
 		return 1
 	}
 
-	changes, err := newTree.Diff(oldTree)
+	changes, err := oldTree.Diff(newTree)
 	if err != nil {
 		h.Info(ColorRedBold, "get new object changes(%s...%s) err: %s", oldRev, newRev, err)
 		return 1
 	}
 
+	stat := make(map[FileType]int)
 	for _, c := range changes {
 		_, toFile, err := c.Files()
+
 		// delete file or not regular file skip check
-		if err != nil || toFile == nil || toFile.Mode == filemode.Regular {
+		if err != nil || toFile == nil || toFile.Mode != filemode.Regular {
 			continue
 		}
-		switch path.Ext(toFile.Name) {
-		case ".php":
-			if h.Conf.StyleCheck.PHP.Enable {
-				return h.PHPStyleCheck(toFile)
-			}
-		case ".js":
-			if h.Conf.StyleCheck.JS.Enable {
-				return h.JSStyleCheck(toFile)
-			}
-		case ".go":
-			if h.Conf.StyleCheck.GO.Enable {
-				return h.GOStyleCheck(toFile)
-			}
+
+		// when is disabled style check, stop checkout file
+		fileType := FileType(strings.ToLower(path.Ext(toFile.Name)))
+		ok, err := h.StyleCheckConfCheck(fileType)
+		if err != nil {
+			h.Info(ColorRedBold, "style check conf was detected some err: %s", err)
+			return 1
 		}
 
+		// style check was disabled, skip checkout file
+		if !ok {
+			continue
+		}
+
+		tempFile, err := h.CreateTempFile(fileType, c.To.Name, toFile)
+		if err != nil {
+			h.Info(ColorRedBold, "get new object changes(%s...%s) err: %s", oldRev, newRev, err)
+			return 1
+		}
+		h.Info(ColorYellowBold, "create temp file: %s", tempFile)
+
+		_, ok = stat[fileType]
+		if !ok {
+			stat[fileType] = 0
+		}
+		stat[fileType]++
 	}
+
+	for fileType := range stat {
+		switch fileType {
+		case FileTypePHP:
+			checkRet := h.PHPStyleCheck()
+			if checkRet > 0 {
+				return checkRet
+			}
+		case FileTypeJS:
+			checkRet := h.JSStyleCheck()
+			if checkRet > 0 {
+				return checkRet
+			}
+		case FileTypeGO:
+			checkRet := h.GOStyleCheck()
+			if checkRet > 0 {
+				return checkRet
+			}
+		}
+	}
+
 	return 0
 }
 
+// ClearTemp delete temp file
+func (h *Hook) ClearTemp() {
+	if h.TempDir == "" {
+		return
+	}
+	_ = os.RemoveAll(h.TempDir)
+}
+
+// StyleCheckConfCheck
+// check conf if is ok
+// return true was run style check
+// error will stop the process then due to commit failed
+func (h *Hook) StyleCheckConfCheck(t FileType) (bool, error) {
+	switch t {
+	case FileTypePHP:
+		if !h.Conf.StyleCheck.PHP.Enable {
+			return false, nil
+		}
+		if h.Conf.StyleCheck.PHP.PHPCS == "" {
+			return false, errors.New("Conf.StyleCheck.PHP.PHPCS is empty")
+		}
+		_, err := os.Stat(h.Conf.StyleCheck.PHP.PHPCS)
+		if err != nil {
+			return false, fmt.Errorf("can't stat PHPCS: %s, err: %s", h.Conf.StyleCheck.PHP.PHPCS, err)
+		}
+	case FileTypeJS:
+		if !h.Conf.StyleCheck.JS.Enable {
+			return false, nil
+		}
+	case FileTypeGO:
+		if !h.Conf.StyleCheck.GO.Enable {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (h *Hook) CreateTempDir() error {
+	tempDir, err := ioutil.TempDir("", "git-pre-receive-tmp")
+	if err != nil {
+		return err
+	}
+	h.TempDir = tempDir
+	return nil
+}
+
+// e.g.:
+// .PHP file save to /tmp/php/$git_full_path
+// .JS file save to /tmp/js/$git_full_path
+func (h *Hook) getRootPathByFileType(t FileType) string {
+	return fmt.Sprintf("%s/%s", h.TempDir, string(t)[1:])
+}
+
+// CreateTempFile
+// Notice: f.Name() was not the fullPath,
+func (h *Hook) CreateTempFile(t FileType, fullPath string, f *object.File) (string, error) {
+	tempFile := fmt.Sprintf("%s/%s", h.getRootPathByFileType(t), fullPath)
+	p := filepath.Dir(tempFile)
+	err := os.MkdirAll(p, 0700)
+	if err != nil {
+		return "", err
+	}
+	tf, err := os.Create(tempFile)
+	if err != nil {
+		return "", err
+	}
+	content, err := f.Contents()
+	if err != nil {
+		return "", err
+	}
+	_, err = tf.WriteString(content)
+	if err != nil {
+		return "", err
+	}
+	_ = tf.Close()
+	return tempFile, nil
+}
+
 // PHPStyleCheck check php code style
-func (h *Hook) PHPStyleCheck(f *object.File) int {
-	h.Info(ColorYellowBold, f.Name)
+func (h *Hook) PHPStyleCheck() int {
+	h.Info(ColorPurple, "PHPCS: %s", h.Conf.StyleCheck.PHP.PHPCS)
 	return 1
 }
 
 // JSStyleCheck check php code style
-func (h *Hook) JSStyleCheck(f *object.File) int {
+func (h *Hook) JSStyleCheck() int {
+	// @todo add js check
 	return 0
 }
 
 // GOStyleCheck check php code style
-func (h *Hook) GOStyleCheck(f *object.File) int {
+func (h *Hook) GOStyleCheck() int {
+	// @todo add go check
 	return 0
 }

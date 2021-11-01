@@ -24,5 +24,6 @@ func main() {
 
 	if err := scanner.Err(); err != nil {
 		fmt.Println(err)
+		os.Exit(1)
 	}
 }
