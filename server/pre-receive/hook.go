@@ -306,7 +306,11 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		}
 
 		// when is disabled style check, stop checkout file
-		fileType := FileType(strings.ToLower(path.Ext(toFile.Name)))
+		fileExt := strings.ToLower(path.Ext(toFile.Name))
+		if fileExt == "" {
+			continue
+		}
+		fileType := FileType(fileExt)
 		ok, err := h.StyleCheckConfCheck(fileType)
 		if err != nil {
 			h.Info(ColorRedBold, "style check conf was detected some err: %s", err)
