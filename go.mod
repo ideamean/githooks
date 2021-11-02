@@ -3,6 +3,7 @@ module githooks
 go 1.14
 
 require (
+	github.com/codeskyblue/go-sh v0.0.0-20200712050446-30169cf553fe
 	github.com/fatih/color v1.13.0 // indirect
 	github.com/go-git/go-git/v5 v5.4.2
 	github.com/sergi/go-diff v1.2.0 // indirect

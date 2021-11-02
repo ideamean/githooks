@@ -1,8 +1,9 @@
 package main
 
 type PHPStyleCheck struct {
-	Enable bool
-	PHPCS  string
+	Enable    bool
+	PHPCS     string
+	PHPCSArgs []interface{}
 }
 
 type JSStyleCheck struct {

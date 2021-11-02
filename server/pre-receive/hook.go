@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"github.com/codeskyblue/go-sh"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/filemode"
@@ -158,7 +159,6 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 // Run
 // return value: when success 0, otherwise > 0
 func (h *Hook) Run(oldRev, newRev, ref string) int {
-	h.Info(ColorRedBold, "DEBUG: %s %s %s", oldRev, newRev, ref)
 	h.parseEnv()
 	err := h.CreateTempDir()
 	if err != nil {
@@ -435,8 +435,15 @@ func (h *Hook) CreateTempFile(t FileType, fullPath string, f *object.File) (stri
 
 // PHPStyleCheck check php code style
 func (h *Hook) PHPStyleCheck() int {
-	h.Info(ColorPurple, "PHPCS: %s", h.Conf.StyleCheck.PHP.PHPCS)
-	return 1
+	args := append(h.Conf.StyleCheck.PHP.PHPCSArgs, "-p", h.getRootPathByFileType(FileTypePHP))
+	sess := sh.Command(h.Conf.StyleCheck.PHP.PHPCS, args...)
+	sess.Stdout = os.Stdout
+	err := sess.Run()
+	if err != nil {
+		h.Info(ColorRedBold, "PHP code style check was rejected!")
+		return 1
+	}
+	return 0
 }
 
 // JSStyleCheck check php code style

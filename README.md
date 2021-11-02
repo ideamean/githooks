@@ -5,10 +5,11 @@ git 勾子golang版本实现, 勾子介绍官方文档：https://git-scm.com/doc
 ## gitlab docker 部署
 
 ```bash
-docker run \
+docker run --detach \
     --publish 443:443 --publish 80:80 --publish 22:22 \
     --name gitlab \
-    gitlab/gitlab-ce
+    --restart always \
+    gitlab/gitlab-ce:latest
 ```
 
 默认账号： root

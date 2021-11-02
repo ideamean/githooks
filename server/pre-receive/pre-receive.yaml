@@ -25,7 +25,15 @@ RequireJiraIDRexp: "([a-zA-Z]+-[0-9]+)"
 StyleCheck:
     PHP:
         Enable: true
+        # 最终执行会自动增加-p $PHP_FILE_DIR 参数
         PHPCS: "/usr/local/bin/phpcs"
+        PHPCSArgs:
+            - "-n"
+            - "--exclude=PSR1.Methods.CamelCapsMethodName"
+            - "--report-width=240"
+            - "--standard=PSR2"
+            - "--colors"
+            - "--encoding=utf-8"
     JS:
         Enable: false
     GO:
