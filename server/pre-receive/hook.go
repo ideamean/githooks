@@ -397,6 +397,13 @@ func (h *Hook) StyleCheckConfCheck(t FileType) (bool, error) {
 		if !h.Conf.StyleCheck.GO.Enable {
 			return false, nil
 		}
+		if h.Conf.StyleCheck.GO.GolangCiLint == "" {
+			return false, errors.New("Conf.StyleCheck.GO.GolangCiLint is empty")
+		}
+		_, err := os.Stat(h.Conf.StyleCheck.GO.GolangCiLint)
+		if err != nil {
+			return false, fmt.Errorf("can't stat golangci-lint: %s, err: %s", h.Conf.StyleCheck.GO.GolangCiLint, err)
+		}
 	}
 	return true, nil
 }
@@ -463,6 +470,24 @@ func (h *Hook) JSStyleCheck() int {
 
 // GOStyleCheck check php code style
 func (h *Hook) GOStyleCheck() int {
-	// @todo add go check
+	dir, err := os.Getwd()
+	if err != nil {
+		h.Info(ColorRedBold, "go code style check err: %s", err)
+		return 1
+	}
+	defer func() {
+		_ = os.Chdir(dir)
+	}()
+	// golangci-lint not support pass a absolute path
+	_ = os.Chdir(h.getRootPathByFileType(FileTypeGO))
+
+	args := h.Conf.StyleCheck.GO.GolangCiLintArgs
+	sess := sh.Command(h.Conf.StyleCheck.GO.GolangCiLint, args...)
+	sess.Stdout = os.Stdout
+	err = sess.Run()
+	if err != nil {
+		h.Info(ColorRedBold, "go code style check was rejected!")
+		return 1
+	}
 	return 0
 }

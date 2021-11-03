@@ -7,7 +7,6 @@ AllowEmail:
     - "gmail.com"
 # 分支保护, 不允许直接推送, 必须通过合并请求推送
 ProtectBranch:
-    - "master"
     # 新版本主支名
     - "main"
 # 超级账号, 在该账号是合法的邮箱格式时，该账号不做规则检测
@@ -37,4 +36,21 @@ StyleCheck:
     JS:
         Enable: false
     GO:
-        Enable: false
+        Enable: true
+        # https://golangci-lint.run/usage/quick-start/
+        GolangCiLint: "/usr/local/bin/golangci-lint"
+        GolangCiLintArgs:
+            - "run"
+            - "--disable-all"
+            - "-E"
+            - "gofmt"
+            - "-E"
+            - "misspell"
+            - "-E"
+            - "whitespace"
+            - "-E"
+            - "unparam"
+            - "-j"
+            - "1000"
+            - "--color"
+            - "always"

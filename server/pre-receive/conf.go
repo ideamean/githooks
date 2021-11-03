@@ -12,8 +12,9 @@ type JSStyleCheck struct {
 }
 
 type GOStyleCheck struct {
-	Enable bool
-	PHPCS  string
+	Enable           bool
+	GolangCiLint     string
+	GolangCiLintArgs []interface{}
 }
 
 type StyleCheck struct {
