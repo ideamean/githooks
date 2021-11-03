@@ -25,6 +25,8 @@ type StyleCheck struct {
 
 // Conf hook配置
 type Conf struct {
+	// 是否自动清除缓存文件, 调试可以改为false, 缓存文件路径会打印到header信息中
+	ClearCache bool
 	// 代码豁免code文件存储路径
 	// commit message中携带[A]code[/A], 会检测 $CodeExemptionDir/code 文件是否存在，存在则跳过hooks逻辑并删除该文件
 	// 每个code只可使用一次

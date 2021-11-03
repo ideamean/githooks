@@ -1,5 +1,8 @@
 # 配置文件, 可将部署到pre-receive脚本同级目录或/etc下
 
+# 是否自动清除缓存文件, 调试可以改为false, 缓存文件路径会打印到header信息中
+ClearCache: true
+
 # 代码豁免code存放路径, 若配置新创建的目录需要将目录属主设置为git
 CodeExemptionDir: "/tmp/"
 # 允许提交的账号的邮箱, 支持多个

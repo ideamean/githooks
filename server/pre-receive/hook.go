@@ -166,15 +166,17 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		return 1
 	}
 
-	defer func() {
-		h.ClearTemp()
-	}()
-
 	// load config
 	err = h.LoadConfig()
 	if err != nil {
 		h.Info(ColorRedBold, "load config err: %s", err)
 		return 1
+	}
+
+	if h.Conf.ClearCache {
+		defer func() {
+			h.ClearTemp()
+		}()
 	}
 
 	h.InfoHeader(oldRev, newRev, ref)
