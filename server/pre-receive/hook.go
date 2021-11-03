@@ -249,6 +249,11 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		}
 	}
 
+	if h.IsProtectBranch(ref) {
+		h.Info(ColorRedBold, "this branch was protected, can't push directly!")
+		return 1
+	}
+
 	// jiraID
 	if h.Conf.RequireJiraIDRexp != "" {
 		jiraIDArr := h.GetJiraID(obj.Message)

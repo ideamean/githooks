@@ -17,7 +17,7 @@ docker run --detach \
 默认密码： 查看文件 /etc/gitlab/initial_root_password
 
 
-## 服务端hooks部署路径
+## 服务端hooks部署路径(全局对所有库生效)
 
 官方文档：https://docs.gitlab.com/ee/administration/server_hooks.html
 
@@ -35,6 +35,19 @@ docker 部署(镜像：gitlab/gitlab-ce), 路径为：
 
  注：最后一级hooks目录不存在，需要手动创建，并且在hooks目录下创建目录pre-receive.d, 最终hooks的路径为:
  /opt/gitlab/embedded/service/gitlab-shell/hooks/pre-receive.d/pre-receive
+
+## 服务端勾子hooks部署路径(对单个项目生效)
+
+可以在单个项目上部署测试后后，再进行全局部署。
+
+部署方法：
+
+1. 进入gitlab 管理界面
+2. 在管理中心中点击项目，找到要部署的项目
+3. 查看项目的"Gitaly相对路径"
+4. 勾子部署路径为：/var/opt/gitlab/git-data/repositories/$gitaly_path/custom_hooks/
+5. custom_hooks目录要后动创建, 将pre-receive pre-receive.yaml上传到custom_hooks目录
+6. chown -R git:git custom_hooks
 
 ## 勾子介绍
 
@@ -63,6 +76,7 @@ docker 部署(镜像：gitlab/gitlab-ce), 路径为：
 | 检查版本库        | 参考pre-receive.yaml IgnoreRepos配置项, 存在则跳过此版本库的检查 |
 | 检查豁免码        | 参考pre-receive.yaml CodeExemptionDir配置项, 配置豁免码的存储路径, commit message中携带了豁免码, 则判断 CodeExemptionDir/$code 文件是否存在, 存在则跳过检查, 豁免码在commit message中输入:[A]$code[/A]。豁免码的申请流程，暂未支持，需要自行将豁免码文件推送到指定目录下。 |
 | 检查提交方式      | 跳过merge request 提交，否则在代码分支合并时commit message 不符合提交规范 |
+| 检查保护分支      | 参考pre-receive.yaml ProtectBranch 配置项, 若配置则该分支不允许push提交 |
 | 检查Jira ID      | 检查commit message是否包涵jira ID, 格式参考：pre-receive.yaml RequireJiraIDRexp配置项, 留空则不检查 |
 | 读取变更文件      | 将变更文件，根据变更文件类型，存储到不同的目录(取文件的扩展名), 存储到 $temp_dir/$file_extension/$file_path, 扩展名为空, 则认为不是常规则文件跳过检查 |
 | 检验代码规范      | 当前只支持PHP代码风格检查, 需安装PHPCS, 参考pre-receive.yaml StyleCheck.PHP 配置项，配置phpcs路径以及相关参数 |
