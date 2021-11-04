@@ -1,0 +1,59 @@
+# 配置文件, 可将部署到pre-receive脚本同级目录或/etc下
+
+# 是否自动清除缓存文件, 调试可以改为false, 缓存文件路径会打印到header信息中
+ClearCache: true
+
+# 代码豁免code存放路径, 若配置新创建的目录需要将目录属主设置为git
+CodeExemptionDir: "/tmp/"
+# 允许提交的账号的邮箱, 支持多个
+AllowEmail:
+    - "gmail.com"
+# 分支保护, 不允许直接推送, 必须通过合并请求推送
+ProtectBranch:
+    # 新版本主支名
+    - "main"
+# 超级账号, 在该账号是合法的邮箱格式时，该账号不做规则检测
+SuperAccount:
+    - "xxx@gmail.com"
+# 跳过检查的命名空间
+IgnoreNamespace:
+    - "test"
+# 跳过检查的项目
+IgnoreRepos:
+    - "simple"
+# commit message 是否需要带jira号, 正则表达式, 为空则不检测
+RequireJiraIDRexp: "([a-zA-Z]+-[0-9]+)"
+# code check
+StyleCheck:
+    PHP:
+        Enable: true
+        # 最终执行会自动增加-p $PHP_FILE_DIR 参数
+        PHPCS: "/usr/local/bin/phpcs"
+        PHPCSArgs:
+            - "-n"
+            - "--exclude=PSR1.Methods.CamelCapsMethodName"
+            - "--report-width=240"
+            - "--standard=PSR2"
+            - "--colors"
+            - "--encoding=utf-8"
+    JS:
+        Enable: false
+    GO:
+        Enable: true
+        # https://golangci-lint.run/usage/quick-start/
+        GolangCiLint: "/usr/local/bin/golangci-lint"
+        GolangCiLintArgs:
+            - "run"
+            - "--disable-all"
+            - "-E"
+            - "gofmt"
+            - "-E"
+            - "misspell"
+            - "-E"
+            - "whitespace"
+            - "-E"
+            - "unparam"
+            - "-j"
+            - "1000"
+            - "--color"
+            - "always"

@@ -39,6 +39,14 @@ const (
 	FileTypeGO  FileType = ".go"
 )
 
+type GitProtocol string
+
+const (
+	GitProtocolHttp GitProtocol = "http"
+	GitProtocolSSH  GitProtocol = "ssh"
+	GitProtocolWEB  GitProtocol = "web"
+)
+
 var codeExemptionRegexp = regexp.MustCompile(`\[A\]([0-9]+)\[/A\]`)
 
 type Hook struct {
@@ -48,7 +56,8 @@ type Hook struct {
 	// 当前项目所属的命名空间
 	NameSpace string
 	// 临时目录
-	TempDir string
+	TempDir     string
+	GitProtocol GitProtocol
 }
 
 // FindCodeExemption code
@@ -126,6 +135,16 @@ func (h *Hook) parseEnv() {
 	p := strings.Split(os.Getenv("GL_PROJECT_PATH"), "/")
 	h.Repos = p[1]
 	h.NameSpace = p[0]
+
+	proto := os.Getenv("GL_PROTOCOL")
+	switch proto {
+	case "ssh":
+		h.GitProtocol = GitProtocolSSH
+	case "http":
+		h.GitProtocol = GitProtocolHttp
+	case "web":
+		h.GitProtocol = GitProtocolWEB
+	}
 }
 
 func (h *Hook) LoadConfig() error {
@@ -144,16 +163,25 @@ func (h *Hook) LoadConfig() error {
 
 func (h *Hook) Info(color string, format string, param ...interface{}) {
 	message := fmt.Sprintf(format, param...)
+	if h.GitProtocol == GitProtocolWEB {
+		fmt.Printf("GL-HOOK-ERR: %s", message)
+		return
+	}
 	fmt.Printf("%s %s %s\n", color, message, ColorEnd)
 }
 
 func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
+	// disable gitlab ui print header
+	//if h.GitProtocol == GitProtocolWEB {
+	//	return
+	//}
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\bcode exemption: insert \"[A]code[/A]\" into commit message")
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b    repository: %s", h.Repos)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b     namespace: %s", h.NameSpace)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       old_ref: %s", oldRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       new_ref: %s", newRef)
-	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        branch: %s", ref)
+	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           ref: %s", ref)
+	// h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        env: %+v", os.Environ())
 }
 
 // Run
@@ -246,7 +274,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	// merge request
 	keywords := []string{"合并分支", "Merge"}
 	for _, key := range keywords {
-		if strings.Contains(obj.Message, key) {
+		if strings.Contains(obj.Message, key) && h.GitProtocol == GitProtocolWEB {
 			return 0
 		}
 	}
