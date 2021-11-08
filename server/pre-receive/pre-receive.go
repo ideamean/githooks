@@ -20,6 +20,10 @@ func main() {
 		if code > 0 {
 			os.Exit(code)
 		}
+		_, err := hook.CommitLog()
+		if err != nil {
+			hook.Info(ColorRedBold, "commit log err: %s", err)
+		}
 	}
 
 	if err := scanner.Err(); err != nil {

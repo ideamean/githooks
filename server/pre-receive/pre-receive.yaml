@@ -23,6 +23,13 @@ IgnoreRepos:
     - "simple"
 # commit message 是否需要带jira号, 正则表达式, 为空则不检测
 RequireJiraIDRexp: "([a-zA-Z]+-[0-9]+)"
+# 代码提交日志收集
+CommitLogHook:
+    Http:
+        Enable: false
+        ReceiveURL: ""
+        Header:
+            "x-appname": "git-pre-receive"
 # code check
 StyleCheck:
     PHP:

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/codeskyblue/go-sh"
@@ -10,11 +12,13 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/spf13/viper"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 const (
@@ -58,6 +62,32 @@ type Hook struct {
 	// 临时目录
 	TempDir     string
 	GitProtocol GitProtocol
+	// 是否合并请求
+	IsMergeRequest bool
+	OldRef         string
+	NewRef         string
+	Ref            string
+	// 最新的提交
+	NewObject *object.Commit
+}
+
+type CommitLog struct {
+	// 提交人邮箱
+	Author string
+	// 上次提交
+	OldRef string
+	// 最新提交
+	NewRef string
+	// 提交路径: 如refs/head/develop
+	Ref string
+	// 版本库所属命名空间
+	Namespace string
+	// 版本库名
+	Repos string
+	// 提交中携带的jira号
+	JiraIds []string
+	// 文件变更列表
+	FileStats []object.FileStat
 }
 
 // FindCodeExemption code
@@ -112,7 +142,15 @@ func (h *Hook) GetJiraID(message string) []string {
 	reg := regexp.MustCompile(h.Conf.RequireJiraIDRexp)
 	ret := reg.FindAllStringSubmatch(message, 1)
 	if len(ret) > 0 && len(ret[0]) > 0 {
-		return ret[0]
+		m := make(map[string]bool)
+		for _, j := range ret[0] {
+			m[j] = true
+		}
+		r := make([]string, len(m))
+		for k := range m {
+			r = append(r, k)
+		}
+		return r
 	}
 	return []string{}
 }
@@ -182,6 +220,60 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       new_ref: %s", newRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           ref: %s", ref)
 	// h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        env: %+v", os.Environ())
+}
+
+func (h *Hook) CommitLog() (*CommitLog, error) {
+	if h.IsMergeRequest {
+		return nil, nil
+	}
+	stats, err := h.NewObject.Stats()
+	if err != nil {
+		return nil, err
+	}
+
+	log := &CommitLog{
+		Author:    h.NewObject.Author.Email,
+		OldRef:    h.OldRef,
+		NewRef:    h.NewRef,
+		Ref:       h.Ref,
+		Namespace: h.NameSpace,
+		Repos:     h.Repos,
+		JiraIds:   h.GetJiraID(h.NewObject.Message),
+		FileStats: stats,
+	}
+
+	if !h.Conf.CommitLogHook.Http.Enable {
+		return log, err
+	}
+
+	body, err := json.Marshal(log)
+	if err != nil {
+		return log, err
+	}
+
+	client := &http.Client{
+		Timeout: time.Second * 3,
+	}
+
+	request, err := http.NewRequest("POST", h.Conf.CommitLogHook.Http.ReceiveURL, bytes.NewReader(body))
+	if err != nil {
+		return log, err
+	}
+
+	for k, v := range h.Conf.CommitLogHook.Http.Header {
+		request.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return log, err
+	}
+
+	if resp.StatusCode != 200 {
+		return log, fmt.Errorf("http response code was: %d", resp.StatusCode)
+	}
+
+	return log, nil
 }
 
 // Run
@@ -275,6 +367,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	keywords := []string{"合并分支", "Merge"}
 	for _, key := range keywords {
 		if strings.Contains(obj.Message, key) && h.GitProtocol == GitProtocolWEB {
+			h.IsMergeRequest = true
 			return 0
 		}
 	}
