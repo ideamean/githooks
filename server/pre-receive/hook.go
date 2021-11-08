@@ -450,12 +450,13 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 			continue
 		}
 
-		tempFile, err := h.CreateTempFile(fileType, c.To.Name, toFile)
+		_, err = h.CreateTempFile(fileType, c.To.Name, toFile)
 		if err != nil {
 			h.Info(ColorRedBold, "get new object changes(%s...%s) err: %s", oldRev, newRev, err)
 			return 1
 		}
-		h.Info(ColorYellowBold, "create temp file: %s", tempFile)
+
+		// h.Info(ColorYellowBold, "create temp file: %s", tempFile)
 
 		_, ok = stat[fileType]
 		if !ok {
