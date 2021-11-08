@@ -226,6 +226,10 @@ func (h *Hook) CommitLog() (*CommitLog, error) {
 	if h.IsMergeRequest {
 		return nil, nil
 	}
+	if h.NewObject == nil {
+		return nil, errors.New("commit object is nil")
+	}
+
 	stats, err := h.NewObject.Stats()
 	if err != nil {
 		return nil, err
@@ -325,6 +329,8 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		h.Info(ColorRedBold, "get object err: %s", err)
 		return 1
 	}
+
+	h.NewObject = obj
 
 	// check email format
 	isEmailValid := false
