@@ -305,11 +305,6 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	h.InfoHeader(oldRev, newRev, ref)
 
-	if oldRev == EmptyRef || newRev == EmptyRef {
-		h.Info(ColorGreenBold, "commit not changed!")
-		return 0
-	}
-
 	// project path
 	projectPath, err := os.Getwd()
 	if err != nil {
@@ -402,6 +397,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	h.Info(ColorGreenBold, "base rule check passed!")
 
 	if oldRev == EmptyRef || newRev == EmptyRef {
+		h.Info(ColorGreenBold, "commit not changed!")
 		return 0
 	}
 
