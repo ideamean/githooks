@@ -58,8 +58,6 @@ StyleCheck:
             - "misspell"
             - "-E"
             - "whitespace"
-            - "-E"
-            - "unparam"
             - "-j"
             - "1000"
             - "--color"
