@@ -219,6 +219,7 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       old_ref: %s", oldRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       new_ref: %s", newRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           ref: %s", ref)
+	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           protocol: %s", h.GitProtocol)
 	// h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        env: %+v", os.Environ())
 }
 
@@ -305,6 +306,11 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	h.InfoHeader(oldRev, newRev, ref)
 
+	// 控制台分支创建
+	if oldRev == EmptyRef && newRev != EmptyRef && h.GitProtocol == GitProtocolWEB {
+		return 0
+	}
+
 	// project path
 	projectPath, err := os.Getwd()
 	if err != nil {
@@ -321,8 +327,8 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	obj, err := r.CommitObject(plumbing.NewHash(newRev))
 	if err != nil {
-		h.Info(ColorRedBold, "get object err: %s", err)
-		return 1
+		h.Info(ColorRedBold, "get object(%s) err: %s", newRev, err)
+		return 0
 	}
 
 	h.NewObject = obj
@@ -383,6 +389,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		jiraIDArr := h.GetJiraID(obj.Message)
 		if len(jiraIDArr) <= 0 {
 			h.Info(ColorRedBold, "commit message must contain at lease one jira ID, rule: %s, use git commit --amend", h.Conf.RequireJiraIDRexp)
+			h.Info(ColorBlue, "message: %s", obj.Message)
 			return 1
 		}
 	}
@@ -429,12 +436,16 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	stat := make(map[FileType]int)
 	for _, c := range changes {
 		_, toFile, err := c.Files()
-
 		// delete file or not regular file skip check
 		if err != nil || toFile == nil || toFile.Mode != filemode.Regular {
 			continue
 		}
-
+		patch, err := c.Patch()
+		if err == nil {
+			for _, st := range patch.Stats() {
+				h.Info(ColorRedBold, "debug file change: %s, add: %d, del: %d", st.Name, st.Addition, st.Deletion)
+			}
+		}
 		// when is disabled style check, stop checkout file
 		fileExt := strings.ToLower(path.Ext(toFile.Name))
 		if fileExt == "" {
@@ -458,7 +469,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 			return 1
 		}
 
-		// h.Info(ColorYellowBold, "create temp file: %s", tempFile)
+		//h.Info(ColorYellowBold, "create temp file: %s", tempFile)
 
 		_, ok = stat[fileType]
 		if !ok {
