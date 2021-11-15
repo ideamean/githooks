@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +16,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -88,6 +88,13 @@ type CommitLog struct {
 	JiraIds []string
 	// 文件变更列表
 	FileStats []object.FileStat
+	// 提交信息
+	Message string
+}
+
+func (c *CommitLog) String() string {
+	m, _ := json.MarshalIndent(c, "", "    ")
+	return string(m)
 }
 
 // FindCodeExemption code
@@ -144,10 +151,16 @@ func (h *Hook) GetJiraID(message string) []string {
 	if len(ret) > 0 && len(ret[0]) > 0 {
 		m := make(map[string]bool)
 		for _, j := range ret[0] {
+			if j == "" {
+				continue
+			}
 			m[j] = true
 		}
-		r := make([]string, len(m))
+		var r []string
 		for k := range m {
+			if k == "" {
+				continue
+			}
 			r = append(r, k)
 		}
 		return r
@@ -223,17 +236,54 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 	// h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        env: %+v", os.Environ())
 }
 
+func (h *Hook) ParseDiffChangeStats(oldRef, newRef string) ([]object.FileStat, error) {
+	var out []byte
+	var err error
+	var f []object.FileStat
+	if oldRef == EmptyRef {
+		out, err = sh.Command("git", "--no-pager", "show", "--numstat", "--stat", newRef).Output()
+	} else {
+		out, err = sh.Command("git", "--no-pager", "diff", "--numstat", "--stat", h.OldRef+"..."+h.NewRef).Output()
+	}
+
+	if err != nil {
+		return f, err
+	}
+
+	// out:
+	// 5	0	README.md
+	// 1	2	a/b/c/m.go
+	// README.md  | 5 +++++
+	// a/b/c/m.go | 3 +--
+	// 2 files changed, 6 insertions(+), 2 deletions(-)
+	arr := strings.Split(string(out), "\n")
+	for _, line := range arr {
+		if !strings.Contains(line, "\t") {
+			continue
+		}
+		statArr := strings.Split(strings.TrimSpace(line), "\t")
+		if len(statArr) != 3 {
+			continue
+		}
+		addition, _ := strconv.ParseInt(statArr[0], 10, 64)
+		deletion, _ := strconv.ParseInt(statArr[1], 10, 64)
+		stat := object.FileStat{
+			Name:     statArr[2],
+			Addition: int(addition),
+			Deletion: int(deletion),
+		}
+		f = append(f, stat)
+	}
+	return f, nil
+}
+
 func (h *Hook) CommitLog() (*CommitLog, error) {
 	if h.IsMergeRequest {
 		return nil, nil
 	}
-	if h.NewObject == nil {
-		return nil, errors.New("commit object is nil")
-	}
 
-	stats, err := h.NewObject.Stats()
-	if err != nil {
-		return nil, err
+	if h.NewRef == EmptyRef {
+		return nil, errors.New("commit object is nil")
 	}
 
 	log := &CommitLog{
@@ -244,23 +294,24 @@ func (h *Hook) CommitLog() (*CommitLog, error) {
 		Namespace: h.NameSpace,
 		Repos:     h.Repos,
 		JiraIds:   h.GetJiraID(h.NewObject.Message),
-		FileStats: stats,
+		Message:   h.NewObject.Message,
 	}
 
-	if !h.Conf.CommitLogHook.Http.Enable {
-		return log, err
-	}
-
-	body, err := json.Marshal(log)
+	stats, err := h.ParseDiffChangeStats(h.OldRef, h.NewRef)
 	if err != nil {
 		return log, err
+	}
+	log.FileStats = stats
+
+	if !h.Conf.CommitLogHook.Http.Enable {
+		return log, nil
 	}
 
 	client := &http.Client{
 		Timeout: time.Second * 3,
 	}
 
-	request, err := http.NewRequest("POST", h.Conf.CommitLogHook.Http.ReceiveURL, bytes.NewReader(body))
+	request, err := http.NewRequest("POST", h.Conf.CommitLogHook.Http.ReceiveURL, strings.NewReader(log.String()))
 	if err != nil {
 		return log, err
 	}
@@ -284,6 +335,10 @@ func (h *Hook) CommitLog() (*CommitLog, error) {
 // Run
 // return value: when success 0, otherwise > 0
 func (h *Hook) Run(oldRev, newRev, ref string) int {
+	h.OldRef = oldRev
+	h.NewRef = newRev
+	h.Ref = ref
+
 	h.parseEnv()
 	err := h.CreateTempDir()
 	if err != nil {
@@ -440,12 +495,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		if err != nil || toFile == nil || toFile.Mode != filemode.Regular {
 			continue
 		}
-		patch, err := c.Patch()
-		if err == nil {
-			for _, st := range patch.Stats() {
-				h.Info(ColorRedBold, "debug file change: %s, add: %d, del: %d", st.Name, st.Addition, st.Deletion)
-			}
-		}
+
 		// when is disabled style check, stop checkout file
 		fileExt := strings.ToLower(path.Ext(toFile.Name))
 		if fileExt == "" {
