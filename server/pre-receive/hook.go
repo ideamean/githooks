@@ -278,7 +278,7 @@ func (h *Hook) ParseDiffChangeStats(oldRef, newRef string) ([]object.FileStat, e
 }
 
 func (h *Hook) CommitLog() (*CommitLog, error) {
-	if h.IsMergeRequest {
+	if h.IsMergeRequest || h.GitProtocol != GitProtocolSSH {
 		return nil, nil
 	}
 
