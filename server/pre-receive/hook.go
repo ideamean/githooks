@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/codeskyblue/go-sh"
@@ -10,11 +11,14 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/spf13/viper"
 	"io/ioutil"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -58,6 +62,39 @@ type Hook struct {
 	// 临时目录
 	TempDir     string
 	GitProtocol GitProtocol
+	// 是否合并请求
+	IsMergeRequest bool
+	OldRef         string
+	NewRef         string
+	Ref            string
+	// 最新的提交
+	NewObject *object.Commit
+}
+
+type CommitLog struct {
+	// 提交人邮箱
+	Author string
+	// 上次提交
+	OldRef string
+	// 最新提交
+	NewRef string
+	// 提交路径: 如refs/head/develop
+	Ref string
+	// 版本库所属命名空间
+	Namespace string
+	// 版本库名
+	Repos string
+	// 提交中携带的jira号
+	JiraIds []string
+	// 文件变更列表
+	FileStats []object.FileStat
+	// 提交信息
+	Message string
+}
+
+func (c *CommitLog) String() string {
+	m, _ := json.MarshalIndent(c, "", "    ")
+	return string(m)
 }
 
 // FindCodeExemption code
@@ -112,7 +149,21 @@ func (h *Hook) GetJiraID(message string) []string {
 	reg := regexp.MustCompile(h.Conf.RequireJiraIDRexp)
 	ret := reg.FindAllStringSubmatch(message, 1)
 	if len(ret) > 0 && len(ret[0]) > 0 {
-		return ret[0]
+		m := make(map[string]bool)
+		for _, j := range ret[0] {
+			if j == "" {
+				continue
+			}
+			m[j] = true
+		}
+		var r []string
+		for k := range m {
+			if k == "" {
+				continue
+			}
+			r = append(r, k)
+		}
+		return r
 	}
 	return []string{}
 }
@@ -181,12 +232,113 @@ func (h *Hook) InfoHeader(oldRef, newRef, ref string) {
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       old_ref: %s", oldRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b       new_ref: %s", newRef)
 	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           ref: %s", ref)
+	h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b           protocol: %s", h.GitProtocol)
 	// h.Info(ColorYellowBold, "\b\b\b\b\b\b\b\b\b        env: %+v", os.Environ())
+}
+
+func (h *Hook) ParseDiffChangeStats(oldRef, newRef string) ([]object.FileStat, error) {
+	var out []byte
+	var err error
+	var f []object.FileStat
+	if oldRef == EmptyRef {
+		out, err = sh.Command("git", "--no-pager", "show", "--numstat", "--stat", newRef).Output()
+	} else {
+		out, err = sh.Command("git", "--no-pager", "diff", "--numstat", "--stat", h.OldRef+"..."+h.NewRef).Output()
+	}
+
+	if err != nil {
+		return f, err
+	}
+
+	// out:
+	// 5	0	README.md
+	// 1	2	a/b/c/m.go
+	// README.md  | 5 +++++
+	// a/b/c/m.go | 3 +--
+	// 2 files changed, 6 insertions(+), 2 deletions(-)
+	arr := strings.Split(string(out), "\n")
+	for _, line := range arr {
+		if !strings.Contains(line, "\t") {
+			continue
+		}
+		statArr := strings.Split(strings.TrimSpace(line), "\t")
+		if len(statArr) != 3 {
+			continue
+		}
+		addition, _ := strconv.ParseInt(statArr[0], 10, 64)
+		deletion, _ := strconv.ParseInt(statArr[1], 10, 64)
+		stat := object.FileStat{
+			Name:     statArr[2],
+			Addition: int(addition),
+			Deletion: int(deletion),
+		}
+		f = append(f, stat)
+	}
+	return f, nil
+}
+
+func (h *Hook) CommitLog() (*CommitLog, error) {
+	if h.IsMergeRequest || h.GitProtocol != GitProtocolSSH {
+		return nil, nil
+	}
+
+	if h.NewRef == EmptyRef {
+		return nil, errors.New("commit object is nil")
+	}
+
+	log := &CommitLog{
+		Author:    h.NewObject.Author.Email,
+		OldRef:    h.OldRef,
+		NewRef:    h.NewRef,
+		Ref:       h.Ref,
+		Namespace: h.NameSpace,
+		Repos:     h.Repos,
+		JiraIds:   h.GetJiraID(h.NewObject.Message),
+		Message:   h.NewObject.Message,
+	}
+
+	stats, err := h.ParseDiffChangeStats(h.OldRef, h.NewRef)
+	if err != nil {
+		return log, err
+	}
+	log.FileStats = stats
+
+	if !h.Conf.CommitLogHook.Http.Enable {
+		return log, nil
+	}
+
+	client := &http.Client{
+		Timeout: time.Second * 3,
+	}
+
+	request, err := http.NewRequest("POST", h.Conf.CommitLogHook.Http.ReceiveURL, strings.NewReader(log.String()))
+	if err != nil {
+		return log, err
+	}
+
+	for k, v := range h.Conf.CommitLogHook.Http.Header {
+		request.Header.Set(k, v)
+	}
+
+	resp, err := client.Do(request)
+	if err != nil {
+		return log, err
+	}
+
+	if resp.StatusCode != 200 {
+		return log, fmt.Errorf("http response code was: %d", resp.StatusCode)
+	}
+
+	return log, nil
 }
 
 // Run
 // return value: when success 0, otherwise > 0
 func (h *Hook) Run(oldRev, newRev, ref string) int {
+	h.OldRef = oldRev
+	h.NewRef = newRev
+	h.Ref = ref
+
 	h.parseEnv()
 	err := h.CreateTempDir()
 	if err != nil {
@@ -209,8 +361,8 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	h.InfoHeader(oldRev, newRev, ref)
 
-	if oldRev == EmptyRef || newRev == EmptyRef {
-		h.Info(ColorGreenBold, "commit not changed!")
+	// 控制台分支创建
+	if oldRev == EmptyRef && newRev != EmptyRef && h.GitProtocol == GitProtocolWEB {
 		return 0
 	}
 
@@ -230,9 +382,11 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	obj, err := r.CommitObject(plumbing.NewHash(newRev))
 	if err != nil {
-		h.Info(ColorRedBold, "get object err: %s", err)
-		return 1
+		h.Info(ColorRedBold, "get object(%s) err: %s", newRev, err)
+		return 0
 	}
+
+	h.NewObject = obj
 
 	// check email format
 	isEmailValid := false
@@ -275,6 +429,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	keywords := []string{"合并分支", "Merge"}
 	for _, key := range keywords {
 		if strings.Contains(obj.Message, key) && h.GitProtocol == GitProtocolWEB {
+			h.IsMergeRequest = true
 			return 0
 		}
 	}
@@ -289,6 +444,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 		jiraIDArr := h.GetJiraID(obj.Message)
 		if len(jiraIDArr) <= 0 {
 			h.Info(ColorRedBold, "commit message must contain at lease one jira ID, rule: %s, use git commit --amend", h.Conf.RequireJiraIDRexp)
+			h.Info(ColorBlue, "message: %s", obj.Message)
 			return 1
 		}
 	}
@@ -303,6 +459,7 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	h.Info(ColorGreenBold, "base rule check passed!")
 
 	if oldRev == EmptyRef || newRev == EmptyRef {
+		h.Info(ColorGreenBold, "commit not changed!")
 		return 0
 	}
 
@@ -334,7 +491,6 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 	stat := make(map[FileType]int)
 	for _, c := range changes {
 		_, toFile, err := c.Files()
-
 		// delete file or not regular file skip check
 		if err != nil || toFile == nil || toFile.Mode != filemode.Regular {
 			continue
@@ -357,12 +513,13 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 			continue
 		}
 
-		tempFile, err := h.CreateTempFile(fileType, c.To.Name, toFile)
+		_, err = h.CreateTempFile(fileType, c.To.Name, toFile)
 		if err != nil {
 			h.Info(ColorRedBold, "get new object changes(%s...%s) err: %s", oldRev, newRev, err)
 			return 1
 		}
-		h.Info(ColorYellowBold, "create temp file: %s", tempFile)
+
+		//h.Info(ColorYellowBold, "create temp file: %s", tempFile)
 
 		_, ok = stat[fileType]
 		if !ok {

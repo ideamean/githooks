@@ -23,6 +23,12 @@ type StyleCheck struct {
 	GO  GOStyleCheck
 }
 
+type CommitLogHookHttp struct {
+	Enable     bool
+	ReceiveURL string
+	Header     map[string]string
+}
+
 // Conf hook配置
 type Conf struct {
 	// 是否自动清除缓存文件, 调试可以改为false, 缓存文件路径会打印到header信息中
@@ -45,4 +51,8 @@ type Conf struct {
 	RequireJiraIDRexp string
 	// 代码检查
 	StyleCheck StyleCheck
+	// 代码提交日志收集, 支持http接口接收
+	CommitLogHook struct {
+		Http CommitLogHookHttp
+	}
 }

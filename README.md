@@ -82,6 +82,51 @@ docker 部署(镜像：gitlab/gitlab-ce), 路径为：
 | 检验代码规范      | 当前只支持PHP代码风格检查, 需安装PHPCS, 参考pre-receive.yaml StyleCheck.PHP 配置项，配置phpcs路径以及相关参数 |
 | 删除临时文件      | 删除临时文件目录 |
 
+### 将提交日志提交到Http接口
+
+http调用方式：POST
+
+配置项参考：
+
+```yaml
+CommitLogHook:
+    Http:
+        Enable: false
+        ReceiveURL: ""
+        Header:
+            "x-appname": "git-pre-receive"
+```
+
+日志结构体：
+
+```go
+type CommitLog struct {
+	// 提交人邮箱
+	Author string
+	// 上次提交
+	OldRef string
+	// 最新提交
+	NewRef string
+	// 提交路径: 如refs/head/develop
+	Ref string
+	// 版本库所属命名空间
+	Namespace string
+	// 版本库名
+	Repos string
+	// 提交中携带的jira号
+	JiraIds []string
+	// 文件变更列表
+	FileStats []object.FileStat
+	// 提交信息
+	Message string
+}
+
+type FileStat struct {
+	Name     string
+	Addition int
+	Deletion int
+}
+```
 
 ## License
 
