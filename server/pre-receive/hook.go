@@ -390,7 +390,13 @@ func (h *Hook) Run(oldRev, newRev, ref string) int {
 
 	// check email format
 	isEmailValid := false
-	emailSuf := strings.Split(obj.Author.Email, "@")[1]
+	emailArr := strings.Split(obj.Author.Email, "@")
+	if len(emailArr) != 2 {
+		h.Info(ColorRedBold, "email is not valid: %, use command: git config user.email $email", obj.Author.Email)
+		return 1
+	}
+
+	emailSuf := emailArr[1]
 	for _, allowEmail := range h.Conf.AllowEmail {
 		if allowEmail == emailSuf {
 			isEmailValid = true
