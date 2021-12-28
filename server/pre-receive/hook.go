@@ -286,6 +286,10 @@ func (h *Hook) CommitLog() (*CommitLog, error) {
 		return nil, errors.New("commit object is nil")
 	}
 
+	if h.NewObject == nil {
+		return nil, nil
+	}
+
 	log := &CommitLog{
 		Author:    h.NewObject.Author.Email,
 		OldRef:    h.OldRef,
