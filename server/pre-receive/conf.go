@@ -49,6 +49,8 @@ type Conf struct {
 	IgnoreRepos []string
 	// commit message 是否需要带jira号, 正则表达式
 	RequireJiraIDRexp string
+	// 需要排除的jira号, 正则表达式, 为空则返回RequireJiraIDRexp区配的结果
+	ExcludeJiraIDRexp []string
 	// 代码检查
 	StyleCheck StyleCheck
 	// 代码提交日志收集, 支持http接口接收

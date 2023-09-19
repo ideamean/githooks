@@ -157,10 +157,32 @@ func (h *Hook) GetJiraID(message string) []string {
 			m[j] = true
 		}
 		var r []string
+
+		var excludeRule []*regexp.Regexp
+		for _, re := range h.Conf.ExcludeJiraIDRexp {
+			if strings.TrimSpace(re) == "" {
+				continue
+			}
+			excludeRule = append(excludeRule, regexp.MustCompile(re))
+		}
+
 		for k := range m {
 			if k == "" {
 				continue
 			}
+
+			isExclude := false
+			for _, rule := range excludeRule {
+				if rule.MatchString(k) {
+					isExclude = true
+					break
+				}
+			}
+
+			if isExclude {
+				continue
+			}
+
 			r = append(r, k)
 		}
 		return r

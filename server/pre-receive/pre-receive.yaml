@@ -23,6 +23,9 @@ IgnoreRepos:
     - "simple"
 # commit message 是否需要带jira号, 正则表达式, 为空则不检测
 RequireJiraIDRexp: "([a-zA-Z]+-[0-9]+)"
+# 需要排除的jira号, 正则表达式, 为空则返回RequireJiraIDRexp区配的结果
+ExcludeJiraIDRexp:
+    - ""
 # 代码提交日志收集
 CommitLogHook:
     Http:
